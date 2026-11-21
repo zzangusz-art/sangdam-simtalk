@@ -1,0 +1,70 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>AI·음성 경로 모의 테스트</title>
+<script>
+  // 아티팩트 뷰어의 claude.use("sample" | "tts" | "dictation") 을 흉내 낸다(실제 Claude 호출·소리·마이크 없음).
+  // 로컬 서버에서 열기: python -m http.server 8765 → http://localhost:8765/tests/ai-mock.html
+  // 주소 끝에 ?tts=stop 을 붙이면 두 번째 읽기에서 "보는 사람이 멈춤"을 흉내 낸다.
+  window.__calls = []; window.__tts = []; window.__mic = [];
+  var q = location.search;
+
+  function sample(input, opts) {
+    window.__calls.push({ kind: 'text', len: String(input).length });
+    if (opts && opts.onText) { opts.onText({ text: '코칭 테스트', delta: '코칭 테스트' }); }
+    return Promise.resolve({ text: '코칭 테스트 완료', truncated: false, modelTierApplied: 'default' });
+  }
+  sample.json = function (input, opts) {
+    window.__calls.push({ kind: 'json', len: String(input).length, tier: opts && opts.modelTier, sample: String(input).slice(0, 200) });
+    var n = window.__calls.filter(function (c) { return c.kind === 'json'; }).length;
+    if (n === 2 && q.indexOf('ratelimit') >= 0) { return Promise.reject({ code: 'rate_limited', message: 'mock' }); }
+    return Promise.resolve({ reply: '(한숨을 쉬며) 그래도 이건 너무한 거 아니에요? 모의 응답 ' + n, grade: 'warn', tags: ['cold', 'bogus'], why: '공감이 부족합니다.', better: '많이 놀라셨죠.', lawIds: ['m-complaint', 'nope'], end: false });
+  };
+
+  var ttsState = null;
+  var tts = {
+    add: function (text, opts) {
+      var n = window.__tts.filter(function (x) { return x.text; }).length + 1;
+      window.__tts.push({ text: text, voice: opts && opts.voice, language: opts && opts.language });
+      if (q.indexOf('tts=stop') >= 0 && n === 2) {
+        if (ttsState) { ttsState({ state: 'idle', reason: 'viewer_stopped' }); }
+        return Promise.reject({ code: 'stopped', reason: 'viewer_stopped', message: 'mock' });
+      }
+      if (ttsState) { ttsState({ state: 'speaking' }); }
+      return new Promise(function (res) { setTimeout(function () { if (ttsState) { ttsState({ state: 'idle', reason: 'completed' }); } res({ playedMs: 250 }); }, 250); });
+    },
+    stop: function () { window.__tts.push({ stop: true }); if (ttsState) { ttsState({ state: 'idle', reason: 'stopped' }); } return Promise.resolve(); },
+    onState: function (fn) { ttsState = fn; return function () {}; }
+  };
+
+  var dP = null, dF = null, dS = null;
+  var dictation = {
+    start: function (o) {
+      window.__mic.push({ start: o || null });
+      if (dS) { dS({ state: 'starting' }); }
+      return new Promise(function (res) {
+        setTimeout(function () {
+          if (dS) { dS({ state: 'listening' }); } res();
+          if (dP) { dP({ text: '마음만' }); }
+          setTimeout(function () { if (dF) { dF({ text: '마음만 감사히 받겠습니다.' }); } if (dP) { dP({ text: '' }); } }, 150);
+        }, 100);
+      });
+    },
+    stop: function () {
+      window.__mic.push({ stop: true });
+      if (dS) { dS({ state: 'finishing' }); }
+      return new Promise(function (res) {
+        setTimeout(function () { if (dF) { dF({ text: ' 두고 가시면 학교에 신고하고 돌려드려야 합니다.' }); } if (dS) { dS({ state: 'idle', reason: 'stopped' }); } res(); }, 120);
+      });
+    },
+    onPartial: function (fn) { dP = fn; return function () {}; },
+    onFinal: function (fn) { dF = fn; return function () {}; },
+    onState: function (fn) { dS = fn; return function () {}; }
+  };
+
+  var caps = { sample: sample, tts: tts, dictation: dictation };
+  if (q.indexOf('novoice') >= 0) { caps.tts = null; caps.dictation = null; }
+  window.claude = { use: function (name) { return Promise.resolve(caps[name] || null); } };
+  fetch('../dist/simtalk.html').then(function (r) { return r.text(); }).then(function (html) {
+    document.open(); document.write('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' + html); document.close();
+  });
+</script>

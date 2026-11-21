@@ -1,0 +1,4 @@
+# 로컬 작업용 파일은 올리지 않는다
+.claude/
+project.md
+node_modules/
